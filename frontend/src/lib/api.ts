@@ -68,8 +68,8 @@ export interface ProfileCreateData {
 export interface LaunchResult {
   profile_id: string;
   status: string;
-  vnc_ws_port: number;
-  display: string;
+  vnc_ws_port: number | null;
+  display: string | null;
   cdp_url: string | null;
 }
 
@@ -87,8 +87,8 @@ export interface OperatorResult {
   title?: string;
   page_status?: number | string | null;
   screenshot?: string;
-  vnc_ws_port?: number;
-  display?: string;
+  vnc_ws_port?: number | null;
+  display?: string | null;
 }
 
 export interface OperatorBulkResponse {

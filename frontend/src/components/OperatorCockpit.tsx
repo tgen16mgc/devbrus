@@ -499,6 +499,7 @@ export function OperatorCockpit({ profiles, onRefresh, onSelectProfile, onNewPro
                   <ProfileViewer
                     profileId={profile.id}
                     cdpUrl={profile.cdp_url}
+                    vncWsPort={profile.vnc_ws_port}
                     clipboardSync={profile.clipboard_sync}
                     onDisconnect={() => void onRefresh()}
                   />

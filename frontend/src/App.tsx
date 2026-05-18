@@ -271,6 +271,7 @@ function AppContent({ authRequired, onLogout }: AppContentProps) {
               key={selected.id}
               profileId={selected.id}
               cdpUrl={selected.cdp_url}
+              vncWsPort={selected.vnc_ws_port}
               clipboardSync={selected.clipboard_sync}
               onDisconnect={handleVncDisconnect}
             />

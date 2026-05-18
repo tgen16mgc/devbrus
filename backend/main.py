@@ -555,7 +555,7 @@ async def launch_profile(profile_id: str):
         profile_id=profile_id,
         status="running",
         vnc_ws_port=running.ws_port,
-        display=f":{running.display}",
+        display=running.display_label,
         cdp_url=f"/api/profiles/{profile_id}/cdp",
     )
 
@@ -732,7 +732,7 @@ async def operator_bulk(req: OperatorBulkRequest):
                         "status": "ok",
                         "detail": "launched",
                         "vnc_ws_port": running.ws_port,
-                        "display": f":{running.display}",
+                        "display": running.display_label,
                     }
                 if req.action == "stop":
                     if profile_id not in browser_mgr.running:
@@ -748,7 +748,7 @@ async def operator_bulk(req: OperatorBulkRequest):
                     "status": "ok",
                     "detail": "restarted",
                     "vnc_ws_port": running.ws_port,
-                    "display": f":{running.display}",
+                    "display": running.display_label,
                 }
             except Exception as exc:
                 return {"profile_id": profile_id, "status": "error", "detail": str(exc)}
@@ -1090,6 +1090,9 @@ async def vnc_proxy(websocket: WebSocket, profile_id: str):
     running = browser_mgr.running.get(profile_id)
     if not running:
         await websocket.close(code=4004, reason="Profile not running")
+        return
+    if running.ws_port is None:
+        await websocket.close(code=4005, reason="Profile is running in native window mode")
         return
 
     # Accept with client's requested subprotocol (if any) — RFC 6455 requires

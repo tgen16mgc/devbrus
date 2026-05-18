@@ -117,3 +117,42 @@ def test_get_status_running():
         "display": ":100",
         "cdp_url": "/api/profiles/abc/cdp",
     }
+
+
+def test_get_status_running_native():
+    from backend.browser_manager import BrowserManager, RunningProfile
+    from unittest.mock import MagicMock
+    mgr = BrowserManager()
+    mgr.running["abc"] = RunningProfile(
+        profile_id="abc",
+        context=MagicMock(),
+        display=None,
+        ws_port=None,
+        cdp_port=5100,
+        mode="native",
+    )
+    status = mgr.get_status("abc")
+    assert status == {
+        "status": "running",
+        "vnc_ws_port": None,
+        "display": "native",
+        "cdp_url": "/api/profiles/abc/cdp",
+    }
+
+
+def test_vnc_auto_mode_uses_native_when_xvnc_missing(monkeypatch):
+    from backend.browser_manager import BrowserManager
+
+    monkeypatch.delenv("CLOAKBROWSER_MANAGER_VNC", raising=False)
+    monkeypatch.setattr("backend.browser_manager.shutil.which", lambda name: None)
+
+    assert BrowserManager()._should_use_vnc() is False
+
+
+def test_vnc_can_be_forced(monkeypatch):
+    from backend.browser_manager import BrowserManager
+
+    monkeypatch.setenv("CLOAKBROWSER_MANAGER_VNC", "true")
+    monkeypatch.setattr("backend.browser_manager.shutil.which", lambda name: None)
+
+    assert BrowserManager()._should_use_vnc() is True

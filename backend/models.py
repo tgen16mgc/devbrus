@@ -124,8 +124,8 @@ class ProfileResponse(BaseModel):
 class LaunchResponse(BaseModel):
     profile_id: str
     status: str = "running"
-    vnc_ws_port: int
-    display: str
+    vnc_ws_port: int | None = None
+    display: str | None = None
     cdp_url: str | None = None
 
 

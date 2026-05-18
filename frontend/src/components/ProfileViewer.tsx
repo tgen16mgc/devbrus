@@ -5,6 +5,7 @@ import { api } from "../lib/api";
 interface ProfileViewerProps {
   profileId: string;
   cdpUrl: string | null;
+  vncWsPort: number | null;
   clipboardSync: boolean;
   onDisconnect: () => void;
 }
@@ -12,7 +13,7 @@ interface ProfileViewerProps {
 // X11 keysym for V key (Ctrl is already held in VNC by the time we intercept)
 const XK_v = 0x0076;
 
-export function ProfileViewer({ profileId, cdpUrl, clipboardSync: initialClipboardSync, onDisconnect }: ProfileViewerProps) {
+export function ProfileViewer({ profileId, cdpUrl, vncWsPort, clipboardSync: initialClipboardSync, onDisconnect }: ProfileViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rfbRef = useRef<any>(null);
   const [connected, setConnected] = useState(false);
@@ -22,6 +23,8 @@ export function ProfileViewer({ profileId, cdpUrl, clipboardSync: initialClipboa
   const [cdpCopied, setCdpCopied] = useState(false);
 
   useEffect(() => {
+    if (vncWsPort == null) return;
+
     let rfb: any = null;
     let cancelled = false;
 
@@ -78,7 +81,7 @@ export function ProfileViewer({ profileId, cdpUrl, clipboardSync: initialClipboa
       }
       rfbRef.current = null;
     };
-  }, [profileId, onDisconnect]);
+  }, [profileId, vncWsPort, onDisconnect]);
 
   // Host→VNC: intercept Ctrl+V/Cmd+V at keydown (capture phase)
   // Must fire BEFORE noVNC's canvas listener to prevent the race condition
@@ -234,6 +237,42 @@ export function ProfileViewer({ profileId, cdpUrl, clipboardSync: initialClipboa
         <div className="text-center">
           <p className="text-red-400 text-sm mb-2">Connection failed</p>
           <p className="text-gray-500 text-xs">{error}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (vncWsPort == null) {
+    return (
+      <div className="relative h-full flex flex-col">
+        <div className="flex items-center justify-between px-3 py-1.5 bg-surface-1 border-b border-border">
+          <div className="flex items-center gap-2">
+            <span className="h-2 w-2 rounded-full bg-emerald-400" />
+            <span className="text-xs text-gray-400">Native window</span>
+          </div>
+          {cdpUrl && (
+            <button
+              onClick={() => {
+                const base = `${window.location.protocol}//${window.location.host}${cdpUrl}`;
+                navigator.clipboard?.writeText(base).then(() => {
+                  setCdpCopied(true);
+                  setTimeout(() => setCdpCopied(false), 2000);
+                }).catch((err) => console.warn("[cdp] copy failed:", err));
+              }}
+              className={`p-1 ${cdpCopied ? "text-emerald-400" : "text-gray-500 hover:text-gray-300"}`}
+              title={cdpCopied ? "Copied!" : "Copy CDP endpoint URL"}
+            >
+              <Code2 className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+        <div className="flex flex-1 items-center justify-center bg-black px-6 text-center">
+          <div>
+            <p className="text-sm font-medium text-gray-300">Running outside the dashboard</p>
+            <p className="mt-2 max-w-sm text-xs leading-5 text-gray-500">
+              This profile launched as a native CloakBrowser window because KasmVNC is not available in the local runtime.
+            </p>
+          </div>
         </div>
       </div>
     );
