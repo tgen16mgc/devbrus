@@ -59,7 +59,9 @@ async def test_allocate_instance_fields(vnc: VNCManager):
     assert isinstance(instance, VNCInstance)
     assert instance.display == 100
     assert instance.ws_port == 6100
+    assert instance.rfb_port == 5900
     assert instance.process is None  # not started yet
+    assert instance.processes == []
 
 
 # ── get_ws_port ──────────────────────────────────────────────────────────────
@@ -144,15 +146,42 @@ def test_vnc_auto_mode_uses_native_when_xvnc_missing(monkeypatch):
     from backend.browser_manager import BrowserManager
 
     monkeypatch.delenv("CLOAKBROWSER_MANAGER_VNC", raising=False)
-    monkeypatch.setattr("backend.browser_manager.shutil.which", lambda name: None)
+    monkeypatch.setattr("backend.vnc_manager.VNCManager.is_available", lambda self: False)
 
     assert BrowserManager()._should_use_vnc() is False
+
+
+def test_vnc_auto_mode_uses_vnc_when_runtime_available(monkeypatch):
+    from backend.browser_manager import BrowserManager
+
+    monkeypatch.delenv("CLOAKBROWSER_MANAGER_VNC", raising=False)
+    monkeypatch.setattr("backend.vnc_manager.VNCManager.has_kasmvnc", lambda self: True)
+
+    assert BrowserManager()._should_use_vnc() is True
 
 
 def test_vnc_can_be_forced(monkeypatch):
     from backend.browser_manager import BrowserManager
 
     monkeypatch.setenv("CLOAKBROWSER_MANAGER_VNC", "true")
-    monkeypatch.setattr("backend.browser_manager.shutil.which", lambda name: None)
+    monkeypatch.setattr("backend.vnc_manager.VNCManager.is_available", lambda self: True)
 
     assert BrowserManager()._should_use_vnc() is True
+
+
+def test_vnc_runtime_available_with_xvfb_stack(monkeypatch):
+    monkeypatch.setattr("backend.vnc_manager.VNCManager._xvnc_bin", lambda self: None)
+    monkeypatch.setattr("backend.vnc_manager.VNCManager._xvfb_bin", lambda self: "/opt/X11/bin/Xvfb")
+    monkeypatch.setattr("backend.vnc_manager.VNCManager._x11vnc_bin", lambda self: "/opt/homebrew/bin/x11vnc")
+
+    assert VNCManager().is_available() is True
+
+
+def test_vnc_auto_mode_does_not_use_xvfb_stack(monkeypatch):
+    from backend.browser_manager import BrowserManager
+
+    monkeypatch.delenv("CLOAKBROWSER_MANAGER_VNC", raising=False)
+    monkeypatch.setattr("backend.vnc_manager.VNCManager.has_kasmvnc", lambda self: False)
+    monkeypatch.setattr("backend.vnc_manager.VNCManager.is_available", lambda self: True)
+
+    assert BrowserManager()._should_use_vnc() is False

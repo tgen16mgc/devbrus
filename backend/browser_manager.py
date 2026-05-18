@@ -6,7 +6,6 @@ import asyncio
 import json
 import logging
 import os
-import shutil
 import socket
 import time
 from dataclasses import dataclass
@@ -402,11 +401,11 @@ class BrowserManager:
         does not, so native windows are the only useful visible launch mode.
         """
         mode = os.getenv("CLOAKBROWSER_MANAGER_VNC", "auto").strip().lower()
-        if mode in {"1", "true", "yes", "on", "force"}:
-            return True
+        if mode in {"1", "true", "yes", "on", "force", "x11vnc"}:
+            return self.vnc.is_available()
         if mode in {"0", "false", "no", "off", "native"}:
             return False
-        return shutil.which("Xvnc") is not None
+        return self.vnc.has_kasmvnc()
 
     def _build_fingerprint_args(self, profile: dict[str, Any], *, use_vnc: bool = True) -> list[str]:
         """Build extra Chromium args from profile fingerprint settings."""
