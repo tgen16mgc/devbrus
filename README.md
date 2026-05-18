@@ -143,6 +143,29 @@ await page.goto("https://example.com");
 
 The CDP URL is available in the toolbar (code icon) when a profile is running. The same browser session is accessible both visually through VNC and programmatically through the API.
 
+## Operator Cockpit
+
+This fork adds local operator controls for large profile batches:
+
+- CSV import with `profile_name,proxy_url,group,notes`
+- bulk launch, stop, and restart with fixed concurrency
+- operator-assist automation: open URL, new tab, reload, back, forward, screenshot, and inspect
+- dashboard grid modes for overview, work, and focus
+- saved dashboard/native layouts
+- lightweight event log and metadata export/import
+
+Native window arrangement is host-side because Docker cannot move macOS or Windows windows directly. Use the helper to plan or apply a grid:
+
+```bash
+python -m backend.native_window_helper \
+  --titles '["profile_001","profile_002"]' \
+  --columns 2 \
+  --rows 1 \
+  --bounds 0,0,1440,900
+```
+
+Add `--apply` to move matching windows on macOS or Windows. macOS requires Accessibility permission for the terminal or launcher running the helper.
+
 ## Remote Access
 
 The container binds to localhost only. To access from a remote server:

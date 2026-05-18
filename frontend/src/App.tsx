@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
-import { Lock, PanelLeftClose, PanelLeft } from "lucide-react";
+import { Lock, PanelLeftClose, PanelLeft, LayoutDashboard } from "lucide-react";
 import { useProfiles } from "./hooks/useProfiles";
 import { api, setOnUnauthorized, type ProfileCreateData } from "./lib/api";
 import { ProfileList } from "./components/ProfileList";
@@ -8,9 +8,10 @@ import { ProfileViewer } from "./components/ProfileViewer";
 import { LaunchButton } from "./components/LaunchButton";
 import { StatusIndicator } from "./components/StatusIndicator";
 import { LoginPage } from "./components/LoginPage";
+import { OperatorCockpit } from "./components/OperatorCockpit";
 
 type AuthState = "checking" | "required" | "ok" | "error";
-type View = "empty" | "create" | "edit" | "view";
+type View = "cockpit" | "empty" | "create" | "edit" | "view";
 
 export default function App() {
   const [authState, setAuthState] = useState<AuthState>("checking");
@@ -89,9 +90,9 @@ interface AppContentProps {
 }
 
 function AppContent({ authRequired, onLogout }: AppContentProps) {
-  const { profiles, loading, error, create, update, remove, launch, stop } = useProfiles();
+  const { profiles, loading, error, refresh, create, update, remove, launch, stop } = useProfiles();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [view, setView] = useState<View>("empty");
+  const [view, setView] = useState<View>("cockpit");
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const selected = profiles.find((p) => p.id === selectedId) ?? null;
@@ -177,6 +178,16 @@ function AppContent({ authRequired, onLogout }: AppContentProps) {
             >
               {sidebarOpen ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeft className="h-4 w-4" />}
             </button>
+            <button
+              onClick={() => {
+                setSelectedId(null);
+                setView("cockpit");
+              }}
+              className={view === "cockpit" ? "text-accent p-1" : "text-gray-500 hover:text-gray-300 p-1"}
+              title="Operator cockpit"
+            >
+              <LayoutDashboard className="h-4 w-4" />
+            </button>
             {selected && (
               <div className="flex items-center gap-2">
                 <StatusIndicator status={selected.status} size="md" />
@@ -214,6 +225,19 @@ function AppContent({ authRequired, onLogout }: AppContentProps) {
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto overscroll-contain">
+          {view === "cockpit" && (
+            <OperatorCockpit
+              profiles={profiles}
+              onRefresh={refresh}
+              onSelectProfile={(id) => {
+                setSelectedId(id);
+                const profile = profiles.find((p) => p.id === id);
+                setView(profile?.status === "running" ? "view" : "edit");
+              }}
+              onNewProfile={handleNew}
+            />
+          )}
+
           {view === "empty" && (
             <div className="flex items-center justify-center h-full">
               <div className="text-center">

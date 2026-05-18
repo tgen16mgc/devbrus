@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
+
+OPERATOR_CSV_TEXT_MAX_LENGTH = 1_048_576
+OPERATOR_CSV_MAX_ROWS = 500
+OPERATOR_PROFILE_IDS_MAX_LENGTH = 100
+OPERATOR_METADATA_PROFILES_MAX_LENGTH = 100
+OPERATOR_METADATA_LAYOUTS_MAX_LENGTH = 100
+OPERATOR_METADATA_EVENTS_MAX_LENGTH = 500
 
 
 class ProfileCreate(BaseModel):
@@ -29,6 +36,9 @@ class ProfileCreate(BaseModel):
     color_scheme: Literal["light", "dark", "no-preference"] | None = None
     launch_args: list[str] = Field(default_factory=list)
     notes: str | None = None
+    group: str | None = None
+    sort_order: int = 0
+    proxy_status: str | None = None
     tags: list[TagCreate] | None = None
 
 
@@ -54,6 +64,9 @@ class ProfileUpdate(BaseModel):
     color_scheme: Literal["light", "dark", "no-preference"] | None = Field(default=None)
     launch_args: list[str] | None = None
     notes: str | None = Field(default=None)
+    group: str | None = Field(default=None)
+    sort_order: int | None = None
+    proxy_status: str | None = Field(default=None)
     tags: list[TagCreate] | None = None
 
 
@@ -96,6 +109,9 @@ class ProfileResponse(BaseModel):
     color_scheme: str | None = None
     launch_args: list[str] = []
     notes: str | None = None
+    group: str | None = None
+    sort_order: int = 0
+    proxy_status: str | None = None
     user_data_dir: str
     created_at: str
     updated_at: str
@@ -132,3 +148,74 @@ class ClipboardRequest(BaseModel):
 
 class LoginRequest(BaseModel):
     token: str
+
+
+class OperatorImportCsvRequest(BaseModel):
+    csv_text: str = Field(max_length=OPERATOR_CSV_TEXT_MAX_LENGTH)
+    validate_proxies: bool = False
+
+
+class OperatorBulkRequest(BaseModel):
+    action: Literal["launch", "stop", "restart"]
+    profile_ids: list[str] = Field(max_length=OPERATOR_PROFILE_IDS_MAX_LENGTH)
+    concurrency: int = Field(default=5, ge=1, le=50)
+
+
+class OperatorAutomationRequest(BaseModel):
+    action: Literal[
+        "open_url",
+        "new_tab",
+        "close_tab",
+        "close_extra_tabs",
+        "reload",
+        "back",
+        "forward",
+        "screenshot",
+        "inspect",
+    ]
+    profile_ids: list[str] = Field(max_length=OPERATOR_PROFILE_IDS_MAX_LENGTH)
+    concurrency: int = Field(default=5, ge=1, le=50)
+    url: str | None = None
+
+
+class LayoutCreate(BaseModel):
+    name: str
+    mode: Literal["dashboard", "native"]
+    columns: int = Field(ge=1)
+    rows: int = Field(ge=1)
+    tile_scale: float = Field(gt=0)
+    monitor: str | None = None
+    profile_order: list[str] = Field(default_factory=list)
+    group: str | None = None
+
+
+class LayoutUpdate(BaseModel):
+    name: str | None = None
+    mode: Literal["dashboard", "native"] | None = None
+    columns: int | None = Field(default=None, ge=1)
+    rows: int | None = Field(default=None, ge=1)
+    tile_scale: float | None = Field(default=None, gt=0)
+    monitor: str | None = Field(default=None)
+    profile_order: list[str] | None = None
+    group: str | None = Field(default=None)
+
+
+class LayoutResponse(LayoutCreate):
+    id: str
+    created_at: str
+    updated_at: str
+
+
+class MetadataImportRequest(BaseModel):
+    profiles: list[dict[str, Any]] = Field(
+        default_factory=list,
+        max_length=OPERATOR_METADATA_PROFILES_MAX_LENGTH,
+    )
+    layouts: list[dict[str, Any]] = Field(
+        default_factory=list,
+        max_length=OPERATOR_METADATA_LAYOUTS_MAX_LENGTH,
+    )
+    events: list[dict[str, Any]] | None = Field(
+        default=None,
+        max_length=OPERATOR_METADATA_EVENTS_MAX_LENGTH,
+    )
