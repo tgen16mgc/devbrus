@@ -38,6 +38,12 @@ const GRID_PRESETS: Record<GridMode, { label: string; columns: number; rows: num
   focus: { label: "Focus 4", columns: 2, rows: 2, scale: 1 },
 };
 
+function nativeReadableScale(mode: GridMode, selectedCount: number) {
+  if (mode === "overview") return selectedCount <= 6 ? 1 : 0.75;
+  if (mode === "work") return selectedCount <= 4 ? 1 : 0.9;
+  return 1;
+}
+
 const SAMPLE_CSV = `profile_name,proxy_url,group,notes
 profile_001,http://user:pass@host:8080,batch_a,optional note
 profile_002,,testing_no_proxy,local test profile`;
@@ -190,7 +196,7 @@ export function OperatorCockpit({ profiles, onRefresh, onSelectProfile, onNewPro
           height: window.screen.availHeight || 900,
         },
         gap: 10,
-        scale: preset.scale,
+        scale: nativeReadableScale(gridMode, selectedRunningIds.length),
         strategy: "index",
       });
       return `${resultSummary(response.results)} · ${response.frames.length} frames`;
