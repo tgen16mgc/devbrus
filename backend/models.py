@@ -178,6 +178,24 @@ class OperatorAutomationRequest(BaseModel):
     url: str | None = None
 
 
+class OperatorGridBounds(BaseModel):
+    left: int
+    top: int
+    width: int = Field(ge=1)
+    height: int = Field(ge=1)
+
+
+class OperatorNativeGridRequest(BaseModel):
+    profile_ids: list[str] = Field(max_length=OPERATOR_PROFILE_IDS_MAX_LENGTH)
+    columns: int = Field(ge=1)
+    rows: int = Field(ge=1)
+    bounds: OperatorGridBounds
+    gap: int = Field(default=10, ge=0)
+    scale: float = Field(default=1.0, gt=0)
+    strategy: Literal["index", "title"] = "index"
+    apply: bool = True
+
+
 class LayoutCreate(BaseModel):
     name: str
     mode: Literal["dashboard", "native"]

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from backend.native_window_helper import Bounds, compute_grid_frames
+from backend.native_window_helper import Bounds, WindowFrame, apply_macos, compute_grid_frames
 
 
 def test_compute_grid_frames_fills_rows_in_order():
@@ -62,3 +62,12 @@ def test_compute_grid_frames_limits_to_available_cells():
 def test_compute_grid_frames_rejects_invalid_inputs(columns, rows, bounds, gap, scale):
     with pytest.raises(ValueError):
         compute_grid_frames(["profile"], columns, rows, bounds, gap=gap, scale=scale)
+
+
+def test_apply_macos_targets_chromium_by_default(monkeypatch):
+    calls = []
+    monkeypatch.setattr("backend.native_window_helper.subprocess.run", lambda cmd, check: calls.append((cmd, check)))
+
+    apply_macos([WindowFrame("profile", 0, 0, 400, 300)], strategy="index")
+
+    assert 'tell process "Chromium"' in calls[0][0][2]

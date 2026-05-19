@@ -157,6 +157,32 @@ describe("operator cockpit api", () => {
     });
   });
 
+  it("sends native grid requests", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ status: "ok", results: [], frames: [] }));
+    await api.gridNativeWindows({
+      profileIds: ["p1", "p2"],
+      columns: 2,
+      rows: 2,
+      bounds: { left: 0, top: 0, width: 1200, height: 800 },
+      gap: 12,
+      scale: 0.9,
+      strategy: "index",
+    });
+    const [url, options] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/operator/native-grid");
+    expect(options.method).toBe("POST");
+    expect(JSON.parse(options.body)).toEqual({
+      profile_ids: ["p1", "p2"],
+      columns: 2,
+      rows: 2,
+      bounds: { left: 0, top: 0, width: 1200, height: 800 },
+      gap: 12,
+      scale: 0.9,
+      strategy: "index",
+      apply: true,
+    });
+  });
+
   it("creates layouts", async () => {
     const layout = {
       id: "l1",

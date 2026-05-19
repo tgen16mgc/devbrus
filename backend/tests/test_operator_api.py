@@ -189,6 +189,66 @@ def test_operator_automation_applies_concurrency_limit(app_client: TestClient):
         main.browser_mgr.running.pop(profile["id"], None)
 
 
+def test_operator_native_grid_arranges_running_profiles(app_client: TestClient, monkeypatch):
+    first = app_client.post("/api/profiles", json={"name": "Native One"}).json()
+    second = app_client.post("/api/profiles", json={"name": "Native Two"}).json()
+    missing = app_client.post("/api/profiles", json={"name": "Stopped"}).json()
+
+    main.browser_mgr.running[first["id"]] = MagicMock()
+    main.browser_mgr.running[second["id"]] = MagicMock()
+
+    calls = []
+
+    def fake_grid_native_windows(*, titles, columns, rows, bounds, gap, scale, strategy, apply):
+        calls.append(
+            {
+                "titles": titles,
+                "columns": columns,
+                "rows": rows,
+                "bounds": bounds,
+                "gap": gap,
+                "scale": scale,
+                "strategy": strategy,
+                "apply": apply,
+            }
+        )
+        return [
+            main.native_window_helper.WindowFrame("Native One", 0, 0, 395, 295),
+            main.native_window_helper.WindowFrame("Native Two", 405, 0, 395, 295),
+        ]
+
+    monkeypatch.setattr(main.native_window_helper, "grid_native_windows", fake_grid_native_windows)
+
+    resp = app_client.post(
+        "/api/operator/native-grid",
+        json={
+            "profile_ids": [first["id"], second["id"], missing["id"]],
+            "columns": 2,
+            "rows": 2,
+            "bounds": {"left": 0, "top": 0, "width": 800, "height": 600},
+            "gap": 10,
+            "scale": 1,
+            "strategy": "index",
+        },
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "partial"
+    assert data["results"] == [
+        {"profile_id": first["id"], "status": "ok", "detail": "arranged"},
+        {"profile_id": second["id"], "status": "ok", "detail": "arranged"},
+        {"profile_id": missing["id"], "status": "error", "detail": "Profile is not running"},
+    ]
+    assert data["frames"][0] == {"title": "Native One", "left": 0, "top": 0, "width": 395, "height": 295}
+    assert calls[0]["titles"] == ["Native One", "Native Two"]
+    assert calls[0]["strategy"] == "index"
+    assert calls[0]["apply"] is True
+
+    main.browser_mgr.running.pop(first["id"], None)
+    main.browser_mgr.running.pop(second["id"], None)
+
+
 def test_operator_layouts_crud_and_event_log(app_client: TestClient):
     create = app_client.post(
         "/api/operator/layouts",

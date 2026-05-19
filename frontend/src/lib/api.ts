@@ -101,6 +101,31 @@ export interface OperatorAutomationResponse {
   results: OperatorResult[];
 }
 
+export interface NativeGridFrame {
+  title: string;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+export interface OperatorNativeGridResponse {
+  status: "ok" | "partial" | "error";
+  results: OperatorResult[];
+  frames: NativeGridFrame[];
+}
+
+export interface OperatorNativeGridInput {
+  profileIds: string[];
+  columns: number;
+  rows: number;
+  bounds: { left: number; top: number; width: number; height: number };
+  gap?: number;
+  scale?: number;
+  strategy?: "index" | "title";
+  apply?: boolean;
+}
+
 export interface OperatorImportCsvResponse {
   created: number;
   skipped: Array<{ row: number; name?: string; reason: string }>;
@@ -239,6 +264,21 @@ export const api = {
         profile_ids: profileIds,
         url: options.url,
         concurrency: options.concurrency ?? 5,
+      }),
+    }),
+
+  gridNativeWindows: (input: OperatorNativeGridInput) =>
+    request<OperatorNativeGridResponse>("/api/operator/native-grid", {
+      method: "POST",
+      body: JSON.stringify({
+        profile_ids: input.profileIds,
+        columns: input.columns,
+        rows: input.rows,
+        bounds: input.bounds,
+        gap: input.gap ?? 10,
+        scale: input.scale ?? 1,
+        strategy: input.strategy ?? "index",
+        apply: input.apply ?? true,
       }),
     }),
 

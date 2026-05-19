@@ -12,7 +12,7 @@ import json
 import platform
 import subprocess
 from dataclasses import asdict, dataclass
-from typing import Iterable
+from typing import Iterable, Literal
 
 
 @dataclass(frozen=True)
@@ -82,23 +82,38 @@ def compute_grid_frames(
     return frames
 
 
-def apply_macos(frames: list[WindowFrame], process_name: str = "CloakBrowser") -> None:
+def apply_macos(
+    frames: list[WindowFrame],
+    process_name: str = "Chromium",
+    strategy: Literal["title", "index"] = "title",
+) -> None:
     """Move macOS windows by title substring using System Events."""
     script_lines = [
         'tell application "System Events"',
         f'  tell process "{process_name}"',
     ]
-    for frame in frames:
-        safe_title = frame.title.replace("\\", "\\\\").replace('"', '\\"')
-        script_lines.extend(
-            [
-                f'    set matches to windows whose name contains "{safe_title}"',
-                "    if (count of matches) > 0 then",
-                f"      set position of item 1 of matches to {{{frame.left}, {frame.top}}}",
-                f"      set size of item 1 of matches to {{{frame.width}, {frame.height}}}",
-                "    end if",
-            ]
-        )
+    if strategy == "index":
+        for index, frame in enumerate(frames, start=1):
+            script_lines.extend(
+                [
+                    f"    if (count of windows) >= {index} then",
+                    f"      set position of window {index} to {{{frame.left}, {frame.top}}}",
+                    f"      set size of window {index} to {{{frame.width}, {frame.height}}}",
+                    "    end if",
+                ]
+            )
+    else:
+        for frame in frames:
+            safe_title = frame.title.replace("\\", "\\\\").replace('"', '\\"')
+            script_lines.extend(
+                [
+                    f'    set matches to windows whose name contains "{safe_title}"',
+                    "    if (count of matches) > 0 then",
+                    f"      set position of item 1 of matches to {{{frame.left}, {frame.top}}}",
+                    f"      set size of item 1 of matches to {{{frame.width}, {frame.height}}}",
+                    "    end if",
+                ]
+            )
     script_lines.extend(["  end tell", "end tell"])
     subprocess.run(["osascript", "-e", "\n".join(script_lines)], check=True)
 
@@ -137,6 +152,40 @@ def apply_windows(frames: list[WindowFrame]) -> None:
     enum_windows(enum_windows_proc(callback), 0)
 
 
+def grid_native_windows(
+    *,
+    titles: list[str],
+    columns: int,
+    rows: int,
+    bounds: Bounds,
+    gap: int = 0,
+    scale: float = 1.0,
+    strategy: Literal["title", "index"] = "index",
+    apply: bool = True,
+    macos_process: str = "Chromium",
+) -> list[WindowFrame]:
+    """Compute and optionally apply a grid to native OS browser windows."""
+    frames = compute_grid_frames(
+        titles,
+        columns=columns,
+        rows=rows,
+        bounds=bounds,
+        gap=gap,
+        scale=scale,
+    )
+    if not apply:
+        return frames
+
+    system = platform.system()
+    if system == "Darwin":
+        apply_macos(frames, process_name=macos_process, strategy=strategy)
+    elif system == "Windows":
+        apply_windows(frames)
+    else:
+        raise RuntimeError(f"Native arrangement is not supported on {system}")
+    return frames
+
+
 def _parse_bounds(raw: str) -> Bounds:
     parts = [int(part.strip()) for part in raw.split(",")]
     if len(parts) != 4:
@@ -152,26 +201,28 @@ def main() -> None:
     parser.add_argument("--bounds", type=_parse_bounds, required=True, help="left,top,width,height")
     parser.add_argument("--gap", type=int, default=0)
     parser.add_argument("--scale", type=float, default=1.0)
+    parser.add_argument("--strategy", choices=["index", "title"], default="index")
     parser.add_argument("--apply", action="store_true", help="Move windows instead of printing the plan.")
-    parser.add_argument("--macos-process", default="CloakBrowser")
+    parser.add_argument("--macos-process", default="Chromium")
     args = parser.parse_args()
 
     titles = json.loads(args.titles)
     if not isinstance(titles, list) or not all(isinstance(title, str) for title in titles):
         raise SystemExit("--titles must be a JSON array of strings")
 
-    frames = compute_grid_frames(titles, args.columns, args.rows, args.bounds, args.gap, args.scale)
+    frames = grid_native_windows(
+        titles=titles,
+        columns=args.columns,
+        rows=args.rows,
+        bounds=args.bounds,
+        gap=args.gap,
+        scale=args.scale,
+        strategy=args.strategy,
+        apply=args.apply,
+        macos_process=args.macos_process,
+    )
     if not args.apply:
         print(json.dumps([asdict(frame) for frame in frames], indent=2))
-        return
-
-    system = platform.system()
-    if system == "Darwin":
-        apply_macos(frames, process_name=args.macos_process)
-    elif system == "Windows":
-        apply_windows(frames)
-    else:
-        raise SystemExit(f"Native arrangement is not supported on {system}")
 
 
 if __name__ == "__main__":

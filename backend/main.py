@@ -30,6 +30,7 @@ from pydantic import ValidationError
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from . import database as db
+from . import native_window_helper
 from .browser_manager import BrowserManager, _normalize_proxy, _validate_proxy
 from .models import (
     ClipboardRequest,
@@ -43,6 +44,7 @@ from .models import (
     OperatorAutomationRequest,
     OperatorBulkRequest,
     OperatorImportCsvRequest,
+    OperatorNativeGridRequest,
     ProfileCreate,
     ProfileResponse,
     ProfileStatusResponse,
@@ -848,6 +850,66 @@ async def operator_automation(req: OperatorAutomationRequest):
         },
     )
     return {"action": req.action, "results": results}
+
+
+@app.post("/api/operator/native-grid")
+async def operator_native_grid(req: OperatorNativeGridRequest):
+    running_profiles: list[dict] = []
+    results: list[dict] = []
+
+    for profile_id in req.profile_ids:
+        profile = db.get_profile(profile_id)
+        if not profile:
+            results.append({"profile_id": profile_id, "status": "error", "detail": "Profile not found"})
+            continue
+        if profile_id not in browser_mgr.running:
+            results.append({"profile_id": profile_id, "status": "error", "detail": "Profile is not running"})
+            continue
+        running_profiles.append(profile)
+        results.append({"profile_id": profile_id, "status": "ok", "detail": "arranged"})
+
+    frames = []
+    if running_profiles:
+        try:
+            frames = native_window_helper.grid_native_windows(
+                titles=[profile["name"] for profile in running_profiles],
+                columns=req.columns,
+                rows=req.rows,
+                bounds=native_window_helper.Bounds(**req.bounds.model_dump()),
+                gap=req.gap,
+                scale=req.scale,
+                strategy=req.strategy,
+                apply=req.apply,
+            )
+        except Exception as exc:
+            running_ids = {profile["id"] for profile in running_profiles}
+            results = [
+                {"profile_id": result["profile_id"], "status": "error", "detail": str(exc)}
+                if result["profile_id"] in running_ids
+                else result
+                for result in results
+            ]
+
+    ok_count = sum(1 for result in results if result["status"] == "ok")
+    error_count = sum(1 for result in results if result["status"] == "error")
+    db.record_event(
+        "native_grid",
+        {
+            "requested": len(req.profile_ids),
+            "ok": ok_count,
+            "error": error_count,
+            "columns": req.columns,
+            "rows": req.rows,
+            "strategy": req.strategy,
+            "apply": req.apply,
+        },
+    )
+    status = "ok" if error_count == 0 else "error" if ok_count == 0 else "partial"
+    return {
+        "status": status,
+        "results": results,
+        "frames": [native_window_helper.asdict(frame) for frame in frames],
+    }
 
 
 @app.get("/api/operator/layouts", response_model=list[LayoutResponse])

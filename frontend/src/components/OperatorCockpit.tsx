@@ -169,6 +169,34 @@ export function OperatorCockpit({ profiles, onRefresh, onSelectProfile, onNewPro
     });
   };
 
+  const arrangeNativeGrid = () => {
+    if (!requireSelection()) return;
+    const selectedRunningIds = selectedProfiles
+      .filter((profile) => profile.status === "running")
+      .map((profile) => profile.id);
+    if (selectedRunningIds.length === 0) {
+      setMessage("Selected profiles must be running.");
+      return;
+    }
+    void runAction("Native grid", async () => {
+      const response = await api.gridNativeWindows({
+        profileIds: selectedRunningIds,
+        columns: preset.columns,
+        rows: preset.rows,
+        bounds: {
+          left: 0,
+          top: 0,
+          width: window.screen.availWidth || 1440,
+          height: window.screen.availHeight || 900,
+        },
+        gap: 10,
+        scale: preset.scale,
+        strategy: "index",
+      });
+      return `${resultSummary(response.results)} · ${response.frames.length} frames`;
+    });
+  };
+
   const importCsv = () => {
     if (!csvText.trim()) {
       setMessage("Paste CSV text first.");
@@ -470,8 +498,16 @@ export function OperatorCockpit({ profiles, onRefresh, onSelectProfile, onNewPro
                 <Grid3X3 className="mx-auto mb-3 h-8 w-8 text-gray-500" />
                 <h3 className="text-sm font-semibold">Native window grid</h3>
                 <p className="mt-2 text-sm text-gray-500">
-                  Native macOS/Windows arrangement is driven by the local helper. Save this layout, then run the helper against the selected profile windows.
+                  Arrange selected running CloakBrowser windows with the current grid preset.
                 </p>
+                <button
+                  className="btn-primary mt-4 inline-flex items-center gap-1.5"
+                  onClick={arrangeNativeGrid}
+                  disabled={busy}
+                >
+                  <Grid3X3 className="h-3.5 w-3.5" />
+                  Arrange selected windows
+                </button>
               </div>
             </div>
           ) : (
