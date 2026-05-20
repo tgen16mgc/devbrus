@@ -7,7 +7,11 @@ for browser profile management with live VNC viewing.
 from __future__ import annotations
 
 import asyncio
+import base64
+import csv
 import hmac
+import inspect as pyinspect
+import io
 import logging
 import os
 import struct
@@ -22,14 +26,25 @@ from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSoc
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import starlette.requests
+from pydantic import ValidationError
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from . import database as db
-from .browser_manager import BrowserManager
+from . import native_window_helper
+from .browser_manager import BrowserManager, _normalize_proxy, _validate_proxy
 from .models import (
     ClipboardRequest,
     LaunchResponse,
+    LayoutCreate,
+    LayoutResponse,
+    LayoutUpdate,
     LoginRequest,
+    MetadataImportRequest,
+    OPERATOR_CSV_MAX_ROWS,
+    OperatorAutomationRequest,
+    OperatorBulkRequest,
+    OperatorImportCsvRequest,
+    OperatorNativeGridRequest,
     ProfileCreate,
     ProfileResponse,
     ProfileStatusResponse,
@@ -542,7 +557,7 @@ async def launch_profile(profile_id: str):
         profile_id=profile_id,
         status="running",
         vnc_ws_port=running.ws_port,
-        display=f":{running.display}",
+        display=running.display_label,
         cdp_url=f"/api/profiles/{profile_id}/cdp",
     )
 
@@ -577,6 +592,460 @@ async def get_system_status():
         binary_version=CHROMIUM_VERSION,
         profiles_total=len(profiles),
     )
+
+
+# ── Operator Cockpit ─────────────────────────────────────────────────────────
+
+
+def _serialize_profile(profile: dict) -> dict:
+    data = dict(profile)
+    data.pop("user_data_dir", None)
+    data.pop("status", None)
+    data.pop("vnc_ws_port", None)
+    data.pop("cdp_url", None)
+    return data
+
+
+def _profile_name_exists(name: str) -> bool:
+    return db.get_profile_by_name(name) is not None
+
+
+def _proxy_status(proxy: str | None, validate: bool) -> str:
+    if not proxy:
+        return "no_proxy"
+    return "format_valid" if validate else "unchecked"
+
+
+def _raw_import_name(record: dict) -> str | None:
+    raw_name = record.get("name")
+    return raw_name if isinstance(raw_name, str) else None
+
+
+async def _run_limited(items: list[str], concurrency: int, fn):
+    if not items:
+        return []
+    results: list[dict | None] = [None] * len(items)
+    next_index = 0
+    lock = asyncio.Lock()
+
+    async def worker():
+        nonlocal next_index
+        while True:
+            async with lock:
+                if next_index >= len(items):
+                    return
+                idx = next_index
+                next_index += 1
+            results[idx] = await fn(items[idx])
+
+    worker_count = min(max(1, concurrency), len(items))
+    await asyncio.gather(*(worker() for _ in range(worker_count)))
+    return [result for result in results if result is not None]
+
+
+@app.post("/api/operator/import-csv")
+async def operator_import_csv(req: OperatorImportCsvRequest):
+    created_ids: list[str] = []
+    skipped: list[dict] = []
+    invalid: list[dict] = []
+
+    try:
+        reader = csv.DictReader(io.StringIO(req.csv_text))
+        fieldnames = reader.fieldnames
+        rows = list(reader)
+    except csv.Error as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid CSV: {exc}") from exc
+
+    if not fieldnames:
+        db.record_event("csv_import", {"created": 0, "skipped": 0, "invalid": 1})
+        return {
+            "created": 0,
+            "skipped": skipped,
+            "invalid": [{"row": 1, "reason": "Missing CSV header"}],
+            "profile_ids": created_ids,
+        }
+
+    if len(rows) > OPERATOR_CSV_MAX_ROWS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"CSV row limit exceeded: max {OPERATOR_CSV_MAX_ROWS} data rows",
+        )
+
+    for row_num, row in enumerate(rows, start=2):
+        name = (row.get("profile_name") or row.get("name") or "").strip()
+        proxy = (row.get("proxy_url") or row.get("proxy") or "").strip() or None
+        group = (row.get("group") or "").strip() or None
+        notes = (row.get("notes") or "").strip() or None
+
+        if not name:
+            invalid.append({"row": row_num, "name": name, "reason": "Missing profile name"})
+            continue
+        if _profile_name_exists(name):
+            skipped.append({"row": row_num, "name": name, "reason": "duplicate"})
+            continue
+
+        if proxy and req.validate_proxies:
+            try:
+                normalized = _normalize_proxy(proxy)
+                _validate_proxy(normalized)
+                proxy = normalized
+            except ValueError as exc:
+                invalid.append({"row": row_num, "name": name, "reason": str(exc)})
+                continue
+
+        profile = db.create_profile(
+            name=name,
+            proxy=proxy,
+            group=group,
+            notes=notes,
+            proxy_status=_proxy_status(proxy, req.validate_proxies),
+        )
+        created_ids.append(profile["id"])
+
+    summary = {
+        "created": len(created_ids),
+        "skipped": skipped,
+        "invalid": invalid,
+        "profile_ids": created_ids,
+    }
+    db.record_event(
+        "csv_import",
+        {"created": len(created_ids), "skipped": len(skipped), "invalid": len(invalid)},
+    )
+    return summary
+
+
+@app.post("/api/operator/bulk")
+async def operator_bulk(req: OperatorBulkRequest):
+    semaphore = asyncio.Semaphore(req.concurrency)
+
+    async def run_one(profile_id: str) -> dict:
+        async with semaphore:
+            profile = db.get_profile(profile_id)
+            if not profile:
+                return {"profile_id": profile_id, "status": "error", "detail": "Profile not found"}
+            try:
+                if req.action == "launch":
+                    if profile_id in browser_mgr.running:
+                        return {"profile_id": profile_id, "status": "error", "detail": "Profile already running"}
+                    running = await browser_mgr.launch(profile)
+                    return {
+                        "profile_id": profile_id,
+                        "status": "ok",
+                        "detail": "launched",
+                        "vnc_ws_port": running.ws_port,
+                        "display": running.display_label,
+                    }
+                if req.action == "stop":
+                    if profile_id not in browser_mgr.running:
+                        return {"profile_id": profile_id, "status": "error", "detail": "Profile is not running"}
+                    await browser_mgr.stop(profile_id)
+                    return {"profile_id": profile_id, "status": "ok", "detail": "stopped"}
+
+                if profile_id in browser_mgr.running:
+                    await browser_mgr.stop(profile_id)
+                running = await browser_mgr.launch(profile)
+                return {
+                    "profile_id": profile_id,
+                    "status": "ok",
+                    "detail": "restarted",
+                    "vnc_ws_port": running.ws_port,
+                    "display": running.display_label,
+                }
+            except Exception as exc:
+                return {"profile_id": profile_id, "status": "error", "detail": str(exc)}
+
+    results = await _run_limited(req.profile_ids, req.concurrency, run_one)
+    db.record_event(
+        "bulk_action",
+        {
+            "action": req.action,
+            "requested": len(req.profile_ids),
+            "ok": sum(1 for r in results if r["status"] == "ok"),
+            "error": sum(1 for r in results if r["status"] == "error"),
+        },
+    )
+    return {"action": req.action, "results": results}
+
+
+async def _maybe_await(value):
+    if pyinspect.isawaitable(value):
+        return await value
+    return value
+
+
+def _current_page(running):
+    pages = list(getattr(running.context, "pages", []) or [])
+    return pages[-1] if pages else None
+
+
+@app.post("/api/operator/automation")
+async def operator_automation(req: OperatorAutomationRequest):
+    if req.action == "open_url" and not req.url:
+        raise HTTPException(status_code=422, detail="url is required for open_url")
+
+    async def run_one(profile_id: str) -> dict:
+        running = browser_mgr.running.get(profile_id)
+        if not running:
+            return {"profile_id": profile_id, "status": "error", "detail": "Profile not running"}
+        try:
+            page = _current_page(running)
+            if req.action == "new_tab":
+                if not hasattr(running.context, "new_page"):
+                    return {"profile_id": profile_id, "status": "error", "detail": "Context cannot create pages"}
+                page = await _maybe_await(running.context.new_page())
+                return {"profile_id": profile_id, "status": "ok", "detail": "new_tab"}
+            if not page:
+                return {"profile_id": profile_id, "status": "error", "detail": "No active page"}
+
+            if req.action == "open_url":
+                response = await _maybe_await(page.goto(req.url))
+                status_code = getattr(response, "status", None)
+                result = {"profile_id": profile_id, "status": "ok", "detail": "opened"}
+                if status_code is not None:
+                    result["page_status"] = status_code
+                return result
+            if req.action == "close_tab":
+                await _maybe_await(page.close())
+                return {"profile_id": profile_id, "status": "ok", "detail": "closed"}
+            if req.action == "close_extra_tabs":
+                pages = list(getattr(running.context, "pages", []) or [])
+                for extra_page in pages[:-1]:
+                    await _maybe_await(extra_page.close())
+                return {"profile_id": profile_id, "status": "ok", "detail": f"closed {max(len(pages) - 1, 0)} extra tabs"}
+            if req.action == "reload":
+                response = await _maybe_await(page.reload())
+                return {"profile_id": profile_id, "status": "ok", "page_status": getattr(response, "status", None)}
+            if req.action == "back":
+                response = await _maybe_await(page.go_back())
+                return {"profile_id": profile_id, "status": "ok", "page_status": getattr(response, "status", None)}
+            if req.action == "forward":
+                response = await _maybe_await(page.go_forward())
+                return {"profile_id": profile_id, "status": "ok", "page_status": getattr(response, "status", None)}
+            if req.action == "screenshot":
+                image = await _maybe_await(page.screenshot(type="png"))
+                encoded = base64.b64encode(image).decode("ascii")
+                return {"profile_id": profile_id, "status": "ok", "screenshot": f"data:image/png;base64,{encoded}"}
+            if req.action == "inspect":
+                title = await _maybe_await(page.title())
+                return {
+                    "profile_id": profile_id,
+                    "status": "ok",
+                    "url": getattr(page, "url", None),
+                    "title": title,
+                    "page_status": "running",
+                }
+            return {"profile_id": profile_id, "status": "error", "detail": "Unsupported action"}
+        except Exception as exc:
+            return {"profile_id": profile_id, "status": "error", "detail": str(exc)}
+
+    results = await _run_limited(req.profile_ids, req.concurrency, run_one)
+    db.record_event(
+        "automation_action",
+        {
+            "action": req.action,
+            "requested": len(req.profile_ids),
+            "ok": sum(1 for r in results if r["status"] == "ok"),
+            "error": sum(1 for r in results if r["status"] == "error"),
+        },
+    )
+    return {"action": req.action, "results": results}
+
+
+@app.post("/api/operator/native-grid")
+async def operator_native_grid(req: OperatorNativeGridRequest):
+    running_profiles: list[dict] = []
+    results: list[dict] = []
+
+    for profile_id in req.profile_ids:
+        profile = db.get_profile(profile_id)
+        if not profile:
+            results.append({"profile_id": profile_id, "status": "error", "detail": "Profile not found"})
+            continue
+        if profile_id not in browser_mgr.running:
+            results.append({"profile_id": profile_id, "status": "error", "detail": "Profile is not running"})
+            continue
+        running_profiles.append(profile)
+        results.append({"profile_id": profile_id, "status": "ok", "detail": "arranged"})
+
+    frames = []
+    if running_profiles:
+        try:
+            frames = native_window_helper.grid_native_windows(
+                titles=[profile["name"] for profile in running_profiles],
+                columns=req.columns,
+                rows=req.rows,
+                bounds=native_window_helper.Bounds(**req.bounds.model_dump()),
+                gap=req.gap,
+                scale=req.scale,
+                strategy=req.strategy,
+                apply=req.apply,
+            )
+        except Exception as exc:
+            running_ids = {profile["id"] for profile in running_profiles}
+            results = [
+                {"profile_id": result["profile_id"], "status": "error", "detail": str(exc)}
+                if result["profile_id"] in running_ids
+                else result
+                for result in results
+            ]
+
+    ok_count = sum(1 for result in results if result["status"] == "ok")
+    error_count = sum(1 for result in results if result["status"] == "error")
+    db.record_event(
+        "native_grid",
+        {
+            "requested": len(req.profile_ids),
+            "ok": ok_count,
+            "error": error_count,
+            "columns": req.columns,
+            "rows": req.rows,
+            "strategy": req.strategy,
+            "apply": req.apply,
+        },
+    )
+    status = "ok" if error_count == 0 else "error" if ok_count == 0 else "partial"
+    return {
+        "status": status,
+        "results": results,
+        "frames": [native_window_helper.asdict(frame) for frame in frames],
+    }
+
+
+@app.get("/api/operator/layouts", response_model=list[LayoutResponse])
+async def operator_list_layouts():
+    return [LayoutResponse(**layout) for layout in db.list_layouts()]
+
+
+@app.post("/api/operator/layouts", response_model=LayoutResponse, status_code=201)
+async def operator_create_layout(req: LayoutCreate):
+    layout = db.create_layout(**req.model_dump())
+    db.record_event("layout_save", {"layout_id": layout["id"], "name": layout["name"], "action": "create"})
+    return LayoutResponse(**layout)
+
+
+@app.put("/api/operator/layouts/{layout_id}", response_model=LayoutResponse)
+async def operator_update_layout(layout_id: str, req: LayoutUpdate):
+    layout = db.update_layout(layout_id, **req.model_dump(exclude_unset=True))
+    if not layout:
+        raise HTTPException(status_code=404, detail="Layout not found")
+    db.record_event("layout_save", {"layout_id": layout["id"], "name": layout["name"], "action": "update"})
+    return LayoutResponse(**layout)
+
+
+@app.delete("/api/operator/layouts/{layout_id}")
+async def operator_delete_layout(layout_id: str):
+    layout = db.get_layout(layout_id)
+    if not layout:
+        raise HTTPException(status_code=404, detail="Layout not found")
+    db.delete_layout(layout_id)
+    db.record_event("layout_delete", {"layout_id": layout_id, "name": layout["name"]})
+    return {"ok": True}
+
+
+@app.get("/api/operator/events")
+async def operator_events(limit: int = 100):
+    limit = max(1, min(limit, 500))
+    return db.list_events(limit=limit)
+
+
+@app.get("/api/operator/export-metadata")
+async def operator_export_metadata():
+    return {
+        "profiles": [_serialize_profile(p) for p in db.list_profiles()],
+        "layouts": db.list_layouts(),
+        "events": db.list_events(limit=500),
+    }
+
+
+@app.post("/api/operator/import-metadata")
+async def operator_import_metadata(req: MetadataImportRequest):
+    profile_created = 0
+    profile_skipped = 0
+    layout_created = 0
+    layout_skipped = 0
+    profile_ids: list[str] = []
+    layout_ids: list[str] = []
+    profile_invalid: list[dict] = []
+    layout_invalid: list[dict] = []
+    events_imported = 0
+    events_skipped = 0
+
+    for profile in req.profiles:
+        try:
+            profile_data = ProfileCreate.model_validate(profile)
+        except ValidationError as exc:
+            profile_skipped += 1
+            profile_invalid.append({
+                "name": _raw_import_name(profile),
+                "reason": exc.errors()[0]["msg"] if exc.errors() else "Invalid profile",
+            })
+            continue
+        name = profile_data.name.strip()
+        if not name:
+            profile_skipped += 1
+            profile_invalid.append({"name": profile_data.name, "reason": "Missing profile name"})
+            continue
+        if _profile_name_exists(name):
+            profile_skipped += 1
+            continue
+        tags = [tag.model_dump() for tag in profile_data.tags or []]
+        profile_values = profile_data.model_dump(exclude={"tags"})
+        profile_values["name"] = name
+        created = db.create_profile(
+            **profile_values,
+            tags=tags,
+        )
+        profile_created += 1
+        profile_ids.append(created["id"])
+
+    for layout in req.layouts:
+        try:
+            layout_data = LayoutCreate.model_validate(layout)
+        except ValidationError as exc:
+            layout_skipped += 1
+            layout_invalid.append({
+                "name": _raw_import_name(layout),
+                "reason": exc.errors()[0]["msg"] if exc.errors() else "Invalid layout",
+            })
+            continue
+        name = layout_data.name.strip()
+        if not name:
+            layout_skipped += 1
+            layout_invalid.append({"name": layout_data.name, "reason": "Missing layout name"})
+            continue
+        if db.get_layout_by_name(name):
+            layout_skipped += 1
+            continue
+        layout_values = layout_data.model_dump()
+        layout_values["name"] = name
+        created = db.create_layout(**layout_values)
+        layout_created += 1
+        layout_ids.append(created["id"])
+
+    for event in req.events or []:
+        if db.import_event(event):
+            events_imported += 1
+        else:
+            events_skipped += 1
+
+    summary = {
+        "profiles": {
+            "created": profile_created,
+            "skipped": profile_skipped,
+            "invalid": profile_invalid,
+            "profile_ids": profile_ids,
+        },
+        "layouts": {
+            "created": layout_created,
+            "skipped": layout_skipped,
+            "invalid": layout_invalid,
+            "layout_ids": layout_ids,
+        },
+        "events": {"imported": events_imported, "skipped": events_skipped},
+    }
+    db.record_event("metadata_import", summary)
+    return summary
 
 
 # ── Clipboard Relay ──────────────────────────────────────────────────────────
@@ -683,6 +1152,9 @@ async def vnc_proxy(websocket: WebSocket, profile_id: str):
     running = browser_mgr.running.get(profile_id)
     if not running:
         await websocket.close(code=4004, reason="Profile not running")
+        return
+    if running.ws_port is None:
+        await websocket.close(code=4005, reason="Profile is running in native window mode")
         return
 
     # Accept with client's requested subprotocol (if any) — RFC 6455 requires

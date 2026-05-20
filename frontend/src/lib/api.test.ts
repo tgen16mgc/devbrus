@@ -116,6 +116,102 @@ describe("api.getClipboard", () => {
   });
 });
 
+// ── Operator cockpit endpoints ─────────────────────────────────────────────
+
+describe("operator cockpit api", () => {
+  it("imports CSV text", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ created: 1, skipped: [], invalid: [], profile_ids: ["p1"] }));
+    await api.importCsv("profile_name\np1", true);
+    const [url, options] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/operator/import-csv");
+    expect(options.method).toBe("POST");
+    expect(JSON.parse(options.body)).toEqual({
+      csv_text: "profile_name\np1",
+      validate_proxies: true,
+    });
+  });
+
+  it("sends bulk profile actions with fixed concurrency", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ action: "launch", results: [] }));
+    await api.bulkProfiles("launch", ["p1", "p2"], 5);
+    const [url, options] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/operator/bulk");
+    expect(options.method).toBe("POST");
+    expect(JSON.parse(options.body)).toEqual({
+      action: "launch",
+      profile_ids: ["p1", "p2"],
+      concurrency: 5,
+    });
+  });
+
+  it("sends automation actions", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ action: "open_url", results: [] }));
+    await api.automateProfiles("open_url", ["p1"], { url: "https://example.com" });
+    const [url, options] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/operator/automation");
+    expect(JSON.parse(options.body)).toEqual({
+      action: "open_url",
+      profile_ids: ["p1"],
+      url: "https://example.com",
+      concurrency: 5,
+    });
+  });
+
+  it("sends native grid requests", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ status: "ok", results: [], frames: [] }));
+    await api.gridNativeWindows({
+      profileIds: ["p1", "p2"],
+      columns: 2,
+      rows: 2,
+      bounds: { left: 0, top: 0, width: 1200, height: 800 },
+      gap: 12,
+      scale: 0.9,
+      strategy: "index",
+    });
+    const [url, options] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/operator/native-grid");
+    expect(options.method).toBe("POST");
+    expect(JSON.parse(options.body)).toEqual({
+      profile_ids: ["p1", "p2"],
+      columns: 2,
+      rows: 2,
+      bounds: { left: 0, top: 0, width: 1200, height: 800 },
+      gap: 12,
+      scale: 0.9,
+      strategy: "index",
+      apply: true,
+    });
+  });
+
+  it("creates layouts", async () => {
+    const layout = {
+      id: "l1",
+      name: "Work",
+      mode: "dashboard",
+      columns: 4,
+      rows: 4,
+      tile_scale: 0.82,
+      monitor: null,
+      profile_order: [],
+      group: null,
+      created_at: "now",
+      updated_at: "now",
+    };
+    mockFetch.mockResolvedValueOnce(jsonResponse(layout));
+    await api.createLayout({
+      name: "Work",
+      mode: "dashboard",
+      columns: 4,
+      rows: 4,
+      tile_scale: 0.82,
+      monitor: null,
+      profile_order: [],
+      group: null,
+    });
+    expect(mockFetch.mock.calls[0][0]).toBe("/api/operator/layouts");
+  });
+});
+
 // ── Error handling ──────────────────────────────────────────────────────────
 
 describe("error handling", () => {

@@ -100,6 +100,9 @@ export function ProfileForm({ profile, onSave, onDelete, onCancel }: ProfileForm
         color_scheme: profile.color_scheme,
         launch_args: profile.launch_args ?? [],
         notes: profile.notes,
+        group: profile.group,
+        sort_order: profile.sort_order,
+        proxy_status: profile.proxy_status,
         tags: profile.tags ?? [],
       });
     }
@@ -270,6 +273,24 @@ export function ProfileForm({ profile, onSave, onDelete, onCancel }: ProfileForm
                   </svg>
                 </button>
               </div>
+            </div>
+            <div>
+              <label className="label">Group</label>
+              <input
+                className="input"
+                value={form.group ?? ""}
+                onChange={(e) => set("group", e.target.value || null)}
+                placeholder="batch_a"
+              />
+            </div>
+            <div>
+              <label className="label">Sort Order</label>
+              <input
+                className="input no-spin"
+                type="number"
+                value={form.sort_order ?? 0}
+                onChange={(e) => set("sort_order", Number(e.target.value || 0))}
+              />
             </div>
           </div>
         </section>
