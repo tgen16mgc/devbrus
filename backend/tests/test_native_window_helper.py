@@ -70,4 +70,24 @@ def test_apply_macos_targets_chromium_by_default(monkeypatch):
 
     apply_macos([WindowFrame("profile", 0, 0, 400, 300)], strategy="index")
 
-    assert 'tell process "Chromium"' in calls[0][0][2]
+    assert 'processes whose name is "Chromium"' in calls[0][0][2]
+
+
+def test_apply_macos_index_grids_windows_across_multiple_processes(monkeypatch):
+    calls = []
+    monkeypatch.setattr("backend.native_window_helper.subprocess.run", lambda cmd, check: calls.append((cmd, check)))
+
+    apply_macos(
+        [
+            WindowFrame("one", 0, 0, 400, 300),
+            WindowFrame("two", 410, 0, 400, 300),
+        ],
+        strategy="index",
+    )
+
+    script = calls[0][0][2]
+    assert "repeat with targetProcess in targetProcesses" in script
+    assert "repeat with targetWindow in windows of targetProcess" in script
+    assert "set end of targetWindows to targetWindow" in script
+    assert "if targetWindowCount >= 2 then" in script
+    assert "set position of item 2 of targetWindows to {410, 0}" in script

@@ -255,7 +255,7 @@ export const api = {
   automateProfiles: (
     action: string,
     profileIds: string[],
-    options: { url?: string; concurrency?: number } = {},
+    options: { url?: string; text?: string; xpath?: string; concurrency?: number } = {},
   ) =>
     request<OperatorAutomationResponse>("/api/operator/automation", {
       method: "POST",
@@ -263,6 +263,8 @@ export const api = {
         action,
         profile_ids: profileIds,
         url: options.url,
+        text: options.text,
+        xpath: options.xpath,
         concurrency: options.concurrency ?? 5,
       }),
     }),

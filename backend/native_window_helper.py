@@ -90,16 +90,27 @@ def apply_macos(
     """Move macOS windows by title substring using System Events."""
     script_lines = [
         'tell application "System Events"',
-        f'  tell process "{process_name}"',
+        f'  set targetProcesses to processes whose name is "{process_name}"',
     ]
     if strategy == "index":
+        script_lines.extend(
+            [
+                "  set targetWindows to {}",
+                "  repeat with targetProcess in targetProcesses",
+                "    repeat with targetWindow in windows of targetProcess",
+                "      set end of targetWindows to targetWindow",
+                "    end repeat",
+                "  end repeat",
+                "  set targetWindowCount to count of targetWindows",
+            ]
+        )
         for index, frame in enumerate(frames, start=1):
             script_lines.extend(
                 [
-                    f"    if (count of windows) >= {index} then",
-                    f"      set position of window {index} to {{{frame.left}, {frame.top}}}",
-                    f"      set size of window {index} to {{{frame.width}, {frame.height}}}",
-                    "    end if",
+                    f"  if targetWindowCount >= {index} then",
+                    f"    set position of item {index} of targetWindows to {{{frame.left}, {frame.top}}}",
+                    f"    set size of item {index} of targetWindows to {{{frame.width}, {frame.height}}}",
+                    "  end if",
                 ]
             )
     else:
@@ -107,14 +118,17 @@ def apply_macos(
             safe_title = frame.title.replace("\\", "\\\\").replace('"', '\\"')
             script_lines.extend(
                 [
-                    f'    set matches to windows whose name contains "{safe_title}"',
+                    "  repeat with targetProcess in targetProcesses",
+                    f'    set matches to windows of targetProcess whose name contains "{safe_title}"',
                     "    if (count of matches) > 0 then",
                     f"      set position of item 1 of matches to {{{frame.left}, {frame.top}}}",
                     f"      set size of item 1 of matches to {{{frame.width}, {frame.height}}}",
+                    "      exit repeat",
                     "    end if",
+                    "  end repeat",
                 ]
             )
-    script_lines.extend(["  end tell", "end tell"])
+    script_lines.extend(["end tell"])
     subprocess.run(["osascript", "-e", "\n".join(script_lines)], check=True)
 
 

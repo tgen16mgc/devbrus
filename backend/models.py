@@ -172,10 +172,14 @@ class OperatorAutomationRequest(BaseModel):
         "forward",
         "screenshot",
         "inspect",
+        "click_text",
+        "click_xpath",
     ]
     profile_ids: list[str] = Field(max_length=OPERATOR_PROFILE_IDS_MAX_LENGTH)
     concurrency: int = Field(default=5, ge=1, le=50)
     url: str | None = None
+    text: str | None = None
+    xpath: str | None = None
 
 
 class OperatorGridBounds(BaseModel):

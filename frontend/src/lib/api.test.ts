@@ -157,6 +157,20 @@ describe("operator cockpit api", () => {
     });
   });
 
+  it("sends automation click targets", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ action: "click_xpath", results: [] }));
+    await api.automateProfiles("click_xpath", ["p1"], {
+      xpath: "//button[normalize-space()='Continue']",
+    });
+    const [_url, options] = mockFetch.mock.calls[0];
+    expect(JSON.parse(options.body)).toEqual({
+      action: "click_xpath",
+      profile_ids: ["p1"],
+      xpath: "//button[normalize-space()='Continue']",
+      concurrency: 5,
+    });
+  });
+
   it("sends native grid requests", async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({ status: "ok", results: [], frames: [] }));
     await api.gridNativeWindows({

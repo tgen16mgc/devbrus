@@ -144,6 +144,80 @@ def test_operator_automation_open_url_and_inspect(app_client: TestClient):
     main.browser_mgr.running.pop(profile["id"], None)
 
 
+def test_operator_automation_clicks_button_by_text(app_client: TestClient):
+    profile = app_client.post("/api/profiles", json={"name": "Click By Text"}).json()
+
+    button = MagicMock()
+    button.click = AsyncMock()
+
+    page = MagicMock()
+    page.get_by_role = MagicMock(return_value=button)
+
+    context = MagicMock()
+    context.pages = [page]
+
+    running = MagicMock()
+    running.context = context
+    main.browser_mgr.running[profile["id"]] = running
+
+    resp = app_client.post(
+        "/api/operator/automation",
+        json={
+            "action": "click_text",
+            "profile_ids": [profile["id"]],
+            "text": "Continue",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["results"][0] == {
+        "profile_id": profile["id"],
+        "status": "ok",
+        "detail": "clicked_text",
+    }
+    page.get_by_role.assert_called_once_with("button", name="Continue")
+    button.click.assert_awaited_once()
+
+    main.browser_mgr.running.pop(profile["id"], None)
+
+
+def test_operator_automation_clicks_element_by_xpath(app_client: TestClient):
+    profile = app_client.post("/api/profiles", json={"name": "Click By Xpath"}).json()
+
+    locator = MagicMock()
+    locator.click = AsyncMock()
+
+    page = MagicMock()
+    page.locator = MagicMock(return_value=locator)
+
+    context = MagicMock()
+    context.pages = [page]
+
+    running = MagicMock()
+    running.context = context
+    main.browser_mgr.running[profile["id"]] = running
+
+    resp = app_client.post(
+        "/api/operator/automation",
+        json={
+            "action": "click_xpath",
+            "profile_ids": [profile["id"]],
+            "xpath": "//button[normalize-space()='Continue']",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["results"][0] == {
+        "profile_id": profile["id"],
+        "status": "ok",
+        "detail": "clicked_xpath",
+    }
+    page.locator.assert_called_once_with("xpath=//button[normalize-space()='Continue']")
+    locator.click.assert_awaited_once()
+
+    main.browser_mgr.running.pop(profile["id"], None)
+
+
 def test_operator_automation_applies_concurrency_limit(app_client: TestClient):
     profiles = [
         app_client.post("/api/profiles", json={"name": f"Automate {idx}"}).json()

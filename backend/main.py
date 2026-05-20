@@ -783,6 +783,10 @@ def _current_page(running):
 async def operator_automation(req: OperatorAutomationRequest):
     if req.action == "open_url" and not req.url:
         raise HTTPException(status_code=422, detail="url is required for open_url")
+    if req.action == "click_text" and not req.text:
+        raise HTTPException(status_code=422, detail="text is required for click_text")
+    if req.action == "click_xpath" and not req.xpath:
+        raise HTTPException(status_code=422, detail="xpath is required for click_xpath")
 
     async def run_one(profile_id: str) -> dict:
         running = browser_mgr.running.get(profile_id)
@@ -813,6 +817,14 @@ async def operator_automation(req: OperatorAutomationRequest):
                 for extra_page in pages[:-1]:
                     await _maybe_await(extra_page.close())
                 return {"profile_id": profile_id, "status": "ok", "detail": f"closed {max(len(pages) - 1, 0)} extra tabs"}
+            if req.action == "click_text":
+                button = page.get_by_role("button", name=req.text)
+                await _maybe_await(button.click())
+                return {"profile_id": profile_id, "status": "ok", "detail": "clicked_text"}
+            if req.action == "click_xpath":
+                target = page.locator(f"xpath={req.xpath}")
+                await _maybe_await(target.click())
+                return {"profile_id": profile_id, "status": "ok", "detail": "clicked_xpath"}
             if req.action == "reload":
                 response = await _maybe_await(page.reload())
                 return {"profile_id": profile_id, "status": "ok", "page_status": getattr(response, "status", None)}

@@ -8,6 +8,7 @@ import {
   Grid3X3,
   LayoutDashboard,
   MonitorUp,
+  MousePointerClick,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -60,6 +61,8 @@ export function OperatorCockpit({ profiles, onRefresh, onSelectProfile, onNewPro
   const [gridMode, setGridMode] = useState<GridMode>("work");
   const [viewMode, setViewMode] = useState<ViewMode>("dashboard");
   const [url, setUrl] = useState("");
+  const [clickText, setClickText] = useState("");
+  const [clickXpath, setClickXpath] = useState("");
   const [csvText, setCsvText] = useState("");
   const [metadataText, setMetadataText] = useState("");
   const [validateProxies, setValidateProxies] = useState(false);
@@ -166,9 +169,19 @@ export function OperatorCockpit({ profiles, onRefresh, onSelectProfile, onNewPro
       setMessage("Enter a URL first.");
       return;
     }
+    if (action === "click_text" && !clickText.trim()) {
+      setMessage("Enter button text first.");
+      return;
+    }
+    if (action === "click_xpath" && !clickXpath.trim()) {
+      setMessage("Enter XPath first.");
+      return;
+    }
     void runAction(action, async () => {
       const response = await api.automateProfiles(action, selectedProfileIds, {
         url: url.trim() || undefined,
+        text: clickText.trim() || undefined,
+        xpath: clickXpath.trim() || undefined,
         concurrency: 5,
       });
       return resultSummary(response.results);
@@ -310,19 +323,47 @@ export function OperatorCockpit({ profiles, onRefresh, onSelectProfile, onNewPro
           </div>
 
           <div className="grid gap-2 lg:grid-cols-[1fr_auto]">
-            <div className="flex gap-2">
-              <input
-                className="input"
-                value={url}
-                onChange={(event) => setUrl(event.target.value)}
-                placeholder="https://example.com"
-              />
-              <button className="btn-primary flex items-center gap-1.5" onClick={() => automate("open_url")} disabled={busy}>
-                <ExternalLink className="h-3.5 w-3.5" />
-                Open URL
-              </button>
+            <div className="grid gap-2">
+              <div className="flex gap-2">
+                <input
+                  className="input"
+                  value={url}
+                  onChange={(event) => setUrl(event.target.value)}
+                  placeholder="https://example.com"
+                />
+                <button className="btn-primary flex items-center gap-1.5" onClick={() => automate("open_url")} disabled={busy}>
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  Open URL
+                </button>
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                <div className="flex gap-2">
+                  <input
+                    className="input"
+                    value={clickText}
+                    onChange={(event) => setClickText(event.target.value)}
+                    placeholder="Button text"
+                  />
+                  <button className="btn-secondary flex items-center gap-1.5" onClick={() => automate("click_text")} disabled={busy}>
+                    <MousePointerClick className="h-3.5 w-3.5" />
+                    Click
+                  </button>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    className="input font-mono text-xs"
+                    value={clickXpath}
+                    onChange={(event) => setClickXpath(event.target.value)}
+                    placeholder="//button[normalize-space()='Continue']"
+                  />
+                  <button className="btn-secondary flex items-center gap-1.5" onClick={() => automate("click_xpath")} disabled={busy}>
+                    <MousePointerClick className="h-3.5 w-3.5" />
+                    XPath
+                  </button>
+                </div>
+              </div>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-start gap-2">
               <button className="btn-secondary" onClick={() => bulk("launch")} disabled={busy}>Launch</button>
               <button className="btn-secondary" onClick={() => bulk("restart")} disabled={busy}>Restart</button>
               <button className="btn-danger flex items-center gap-1.5" onClick={() => bulk("stop")} disabled={busy}>
