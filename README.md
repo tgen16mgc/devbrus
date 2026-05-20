@@ -98,10 +98,33 @@ npm run dev
 docker compose up --build
 ```
 
+Run the test suites without installing host dependencies:
+
+```bash
+docker compose --profile test run --rm backend-tests
+docker compose --profile test run --rm frontend-tests
+```
+
+### Native Window Grid
+
+The manager can pass native Chromium window geometry flags when launching profiles. In Docker this arranges browser windows inside the container's virtual screen, so it behaves consistently from Docker Desktop on macOS or Windows.
+
+```bash
+CLOAK_NATIVE_WINDOW_GRID=1 \
+CLOAK_NATIVE_SCREEN_WIDTH=1920 \
+CLOAK_NATIVE_SCREEN_HEIGHT=1080 \
+CLOAK_NATIVE_GRID_COLUMNS=2 \
+CLOAK_NATIVE_GRID_ROWS=2 \
+CLOAK_NATIVE_GRID_GAP=12 \
+docker compose up --build
+```
+
+Docker cannot reposition macOS or Windows host desktop windows from inside the container; use the noVNC view or run a host-native launcher for host-window placement.
+
 ## Requirements
 
 - Docker (20.10+)
-- ~2 GB disk (image + binary)
+- ~6 GB free disk for the Docker image, browser binary, and build cache
 - ~512 MB RAM per running profile
 
 ## Updating

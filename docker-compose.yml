@@ -7,3 +7,33 @@ services:
       - ~/.cloakbrowser-manager:/data
     environment:
       - AUTH_TOKEN=${AUTH_TOKEN:-}
+      - CLOAK_NATIVE_WINDOW_GRID=${CLOAK_NATIVE_WINDOW_GRID:-0}
+      - CLOAK_NATIVE_SCREEN_WIDTH=${CLOAK_NATIVE_SCREEN_WIDTH:-1920}
+      - CLOAK_NATIVE_SCREEN_HEIGHT=${CLOAK_NATIVE_SCREEN_HEIGHT:-1080}
+      - CLOAK_NATIVE_GRID_COLUMNS=${CLOAK_NATIVE_GRID_COLUMNS:-2}
+      - CLOAK_NATIVE_GRID_ROWS=${CLOAK_NATIVE_GRID_ROWS:-2}
+      - CLOAK_NATIVE_GRID_GAP=${CLOAK_NATIVE_GRID_GAP:-0}
+
+  backend-tests:
+    image: python:3.12-slim
+    profiles: ["test"]
+    working_dir: /app
+    volumes:
+      - .:/app
+    command: >
+      sh -c "pip install --no-cache-dir -r backend/requirements-dev.txt
+      && python -m pytest"
+
+  frontend-tests:
+    image: node:20-slim
+    profiles: ["test"]
+    working_dir: /app/frontend
+    volumes:
+      - ./frontend:/app/frontend
+      - frontend_node_modules:/app/frontend/node_modules
+    command: >
+      sh -c "npm ci --no-audit --no-fund
+      && npm test"
+
+volumes:
+  frontend_node_modules:

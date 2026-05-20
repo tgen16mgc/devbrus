@@ -9,10 +9,12 @@ import pytest
 
 import socket
 
+from backend import browser_manager as browser_manager_module
 from backend.browser_manager import (
     BASE_CDP_PORT,
     CDP_PORT_RANGE,
     _init_profile_defaults,
+    _native_window_grid_args,
     _normalize_proxy,
     _validate_proxy,
     BrowserManager,
@@ -142,6 +144,76 @@ def test_build_args_empty_profile():
     assert len(args) == 3
 
 
+# ── native window grid ───────────────────────────────────────────────────────
+
+
+def test_native_window_grid_args_places_second_cell_on_top_row():
+    args = _native_window_grid_args(
+        index=1,
+        screen_width=1920,
+        screen_height=1080,
+        columns=2,
+        rows=2,
+        gap=0,
+    )
+    assert args == ["--window-position=960,0", "--window-size=960,540"]
+
+
+def test_native_window_grid_args_reserves_gap_between_cells():
+    args = _native_window_grid_args(
+        index=4,
+        screen_width=1920,
+        screen_height=1080,
+        columns=3,
+        rows=2,
+        gap=16,
+    )
+    assert args == ["--window-position=650,548", "--window-size=618,516"]
+
+
+def test_native_window_grid_args_rejects_invalid_grid():
+    with pytest.raises(ValueError, match="columns and rows must be positive"):
+        _native_window_grid_args(
+            index=0,
+            screen_width=1920,
+            screen_height=1080,
+            columns=0,
+            rows=2,
+            gap=0,
+        )
+
+
+def test_build_launch_args_omits_native_grid_by_default(monkeypatch):
+    monkeypatch.delenv("CLOAK_NATIVE_WINDOW_GRID", raising=False)
+    args = _mgr._build_launch_args(
+        {"screen_width": 1920, "screen_height": 1080},
+        display=101,
+        cdp_port=5101,
+    )
+    assert "--remote-debugging-port=5101" in args
+    assert not any(a.startswith("--window-position=") for a in args)
+    assert not any(a.startswith("--window-size=") for a in args)
+
+
+def test_build_launch_args_adds_native_grid_when_enabled(monkeypatch):
+    monkeypatch.setenv("CLOAK_NATIVE_WINDOW_GRID", "1")
+    monkeypatch.setenv("CLOAK_NATIVE_SCREEN_WIDTH", "1920")
+    monkeypatch.setenv("CLOAK_NATIVE_SCREEN_HEIGHT", "1080")
+    monkeypatch.setenv("CLOAK_NATIVE_GRID_COLUMNS", "2")
+    monkeypatch.setenv("CLOAK_NATIVE_GRID_ROWS", "2")
+    monkeypatch.setenv("CLOAK_NATIVE_GRID_GAP", "0")
+
+    args = _mgr._build_launch_args(
+        {"screen_width": 1280, "screen_height": 720},
+        display=101,
+        cdp_port=5101,
+    )
+
+    assert "--remote-debugging-port=5101" in args
+    assert "--window-position=960,0" in args
+    assert "--window-size=960,540" in args
+
+
 # ── launch_args appended to extra_args ────────────────────────────────────────
 
 
@@ -211,14 +283,37 @@ def test_allocate_cdp_port_wraps_around():
     assert p2 == BASE_CDP_PORT
 
 
-def test_allocate_cdp_port_all_occupied_raises():
+def _find_free_port_block(size: int) -> int:
+    for start in range(5200, 60000 - size):
+        blockers = []
+        try:
+            for offset in range(size):
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind(("127.0.0.1", start + offset))
+                blockers.append(s)
+            return start
+        except OSError:
+            pass
+        finally:
+            for s in blockers:
+                s.close()
+    raise RuntimeError("No free port block found")
+
+
+def test_allocate_cdp_port_all_occupied_raises(monkeypatch):
+    port_range = 3
+    base_port = _find_free_port_block(port_range)
+    monkeypatch.setattr(browser_manager_module, "BASE_CDP_PORT", base_port)
+    monkeypatch.setattr(browser_manager_module, "CDP_PORT_RANGE", port_range)
+
     mgr = BrowserManager()
     blockers = []
     try:
-        for i in range(CDP_PORT_RANGE):
+        for i in range(port_range):
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            s.bind(("127.0.0.1", BASE_CDP_PORT + i))
+            s.bind(("127.0.0.1", base_port + i))
             s.listen(1)
             blockers.append(s)
         with pytest.raises(ValueError, match="No free CDP ports"):
