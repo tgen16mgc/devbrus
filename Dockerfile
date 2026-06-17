@@ -2,12 +2,15 @@
 FROM node:20-slim AS frontend-builder
 WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json* ./
-RUN npm install
+RUN npm ci --no-audit --no-fund
 COPY frontend/ ./
 RUN npm run build
 
 # Stage 2: Production image
 FROM python:3.12-slim
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_ROOT_USER_ACTION=ignore
 
 # Chromium system deps
 RUN apt-get update && apt-get install -y --no-install-recommends \

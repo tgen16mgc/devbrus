@@ -69,10 +69,11 @@ afterEach(() => {
 });
 
 describe("useProfiles", () => {
-  it("starts with loading state", () => {
+  it("starts with loading state", async () => {
     const { result } = renderHook(() => useProfiles());
     expect(result.current.loading).toBe(true);
     expect(result.current.profiles).toEqual([]);
+    await waitFor(() => expect(result.current.loading).toBe(false));
   });
 
   it("fetches profiles on mount", async () => {

@@ -146,6 +146,48 @@ BASE_CDP_PORT = 5100
 CDP_PORT_RANGE = 100  # cycle through 5100-5199 to avoid TIME_WAIT collisions
 
 
+def _native_window_grid_args(
+    *,
+    index: int,
+    screen_width: int,
+    screen_height: int,
+    columns: int,
+    rows: int,
+    gap: int,
+) -> list[str]:
+    """Build Chromium args for placing a native browser window in a screen grid."""
+    if columns <= 0 or rows <= 0:
+        raise ValueError("columns and rows must be positive")
+    if screen_width <= 0 or screen_height <= 0:
+        raise ValueError("screen width and height must be positive")
+    if gap < 0:
+        raise ValueError("gap must be non-negative")
+
+    usable_width = screen_width - gap * (columns + 1)
+    usable_height = screen_height - gap * (rows + 1)
+    cell_width = max(1, usable_width // columns)
+    cell_height = max(1, usable_height // rows)
+
+    slot = max(0, index) % (columns * rows)
+    col = slot % columns
+    row = slot // columns
+    x = gap + col * (cell_width + gap)
+    y = gap + row * (cell_height + gap)
+
+    return [f"--window-position={x},{y}", f"--window-size={cell_width},{cell_height}"]
+
+
+def _env_flag(name: str) -> bool:
+    return os.getenv(name, "").lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None or value == "":
+        return default
+    return int(value)
+
+
 @dataclass
 class RunningProfile:
     profile_id: str
@@ -213,9 +255,12 @@ class BrowserManager:
                 )
 
             # Build fingerprint args from profile settings
-            extra_args = self._build_fingerprint_args(profile, use_vnc=use_vnc)
-            extra_args += profile.get("launch_args") or []
-            extra_args.append(f"--remote-debugging-port={cdp_port}")
+            extra_args = self._build_launch_args(
+                profile,
+                use_vnc=use_vnc,
+                display=display,
+                cdp_port=cdp_port,
+            )
 
             # Normalize proxy format (host:port:user:pass → http://user:pass@host:port)
             raw_proxy = profile.get("proxy") or None
@@ -447,5 +492,36 @@ class BrowserManager:
             args.append(f"--fingerprint-screen-width={sw}")
         if sh:
             args.append(f"--fingerprint-screen-height={sh}")
+
+        return args
+
+    def _build_launch_args(
+        self,
+        profile: dict[str, Any],
+        *,
+        use_vnc: bool = True,
+        display: int | None,
+        cdp_port: int,
+    ) -> list[str]:
+        args = self._build_fingerprint_args(profile, use_vnc=use_vnc)
+        args += profile.get("launch_args") or []
+        args.append(f"--remote-debugging-port={cdp_port}")
+
+        if _env_flag("CLOAK_NATIVE_WINDOW_GRID"):
+            grid_index = display - self.vnc.BASE_DISPLAY if display is not None else 0
+            args += _native_window_grid_args(
+                index=grid_index,
+                screen_width=_env_int(
+                    "CLOAK_NATIVE_SCREEN_WIDTH",
+                    int(profile.get("screen_width") or 1920),
+                ),
+                screen_height=_env_int(
+                    "CLOAK_NATIVE_SCREEN_HEIGHT",
+                    int(profile.get("screen_height") or 1080),
+                ),
+                columns=_env_int("CLOAK_NATIVE_GRID_COLUMNS", 2),
+                rows=_env_int("CLOAK_NATIVE_GRID_ROWS", 2),
+                gap=_env_int("CLOAK_NATIVE_GRID_GAP", 0),
+            )
 
         return args
